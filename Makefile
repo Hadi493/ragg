@@ -1,10 +1,10 @@
-all: abstract-gg
+# all: abstract-gg
 
-abstract-gg: main.c
-	gcc -Wall -Wextra -o abstract-gg main.c -lm -O3 && ./abstract-gg output.ppm && magick output.ppm output.jpg
+# abstract-gg: main.c
+# 	gcc -Wall -Wextra -o abstract-gg main.c -lm -O3 && ./abstract-gg output.ppm && magick output.ppm output.jpg
 
-gen: abstract-gg
-	 ./abstract-gg output.ppm && magick output.ppm output.jpg
+# gen: abstract-gg
+# 	 ./abstract-gg output.ppm && magick output.ppm output.jpg
 
 v1:
 	 ./versions/agg-v1 output.ppm && magick output.ppm output.jpg

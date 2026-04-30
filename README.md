@@ -6,7 +6,10 @@
 
 Clone the repo
 ```bash
-make
-make gen
+make v1
+# or
+make v2
+# or
+make v3
 ```
 Check [Makefile](Makefile) dependencies.
