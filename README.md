@@ -6,6 +6,8 @@
 
 Clone the repo
 ```bash
+make -B && ./abstract-gg
+# or
 make v1
 # or
 make v2
