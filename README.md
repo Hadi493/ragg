@@ -14,4 +14,4 @@ make v2
 # or
 make v3
 ```
-Check [Makefile](Makefile) dependencies.
+Check [Makefile](Makefile) for dependencies.
