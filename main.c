@@ -1,300 +1,116 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <stdint.h>
-#include <string.h>
 #include <time.h>
 
-typedef struct {
-    uint64_t state;
-} xorshift64_t;
+#define WIDTH 1920
+#define HEIGHT 1080
 
-static inline uint64_t xorshift64_next(xorshift64_t *rng) {
-    uint64_t x = rng->state;
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    rng->state = x;
-    return x;
+float fract(float x) { return x - floorf(x); }
+float mix(float a, float b, float t) { return a + t * (b - a); }
+float length(float x, float y) { return sqrtf(x * x + y * y); }
+
+float rand_f(float min, float max) {
+    return min + ((float)rand() / (float)RAND_MAX) * (max - min);
 }
 
-static inline float xorshift64_float(xorshift64_t *rng) {
-    return (xorshift64_next(rng) >> 11) * (1.0f / 9007199254740992.0f);
+float hash(float x, float y) {
+    float h = sinf(x * 12.9898f + y * 78.233f) * 43758.5453123f;
+    return fract(h);
 }
 
-#define NOISE_TABLE_SIZE 256
-typedef struct {
-    int perm[512];
-    float grad[256][2];
-} perlin_noise_t;
-
-static float fade(float t) {
-    return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+float noise(float x, float y) {
+    float ix = floorf(x);
+    float iy = floorf(y);
+    float fx = fract(x);
+    float fy = fract(y);
+    float ux = fx * fx * (3.0f - 2.0f * fx);
+    float uy = fy * fy * (3.0f - 2.0f * fy);
+    return mix(mix(hash(ix, iy), hash(ix + 1.0f, iy), ux),
+               mix(hash(ix, iy + 1.0f), hash(ix + 1.0f, iy + 1.0f), ux), uy);
 }
 
-static float lerp(float a, float b, float t) {
-    return a + (b - a) * t;
-}
-
-static float grad_dot(float *grad, float x, float y) {
-    return grad[0] * x + grad[1] * y;
-}
-
-static void perlin_init(perlin_noise_t *noise, uint64_t seed) {
-    xorshift64_t rng = {seed};
-
-    for (int i = 0; i < 256; i++) {
-        noise->perm[i] = i;
-        float angle = 2.0f * 3.14159265f * xorshift64_float(&rng);
-        noise->grad[i][0] = cosf(angle);
-        noise->grad[i][1] = sinf(angle);
+float fbm(float x, float y, float c, float s) {
+    float v = 0.0f;
+    float a = 0.5f;
+    for (int i = 0; i < 6; i++) {
+        v += a * noise(x, y);
+        float tx = x;
+        x = (tx * c - y * s) * 2.02f;
+        y = (tx * s + y * c) * 2.03f;
+        a *= 0.5f;
     }
-
-    for (int i = 255; i > 0; i--) {
-        int j = xorshift64_next(&rng) % (i + 1);
-        int tmp = noise->perm[i];
-        noise->perm[i] = noise->perm[j];
-        noise->perm[j] = tmp;
-    }
-
-    for (int i = 0; i < 256; i++) {
-        noise->perm[256 + i] = noise->perm[i];
-    }
-}
-
-static float perlin_2d(perlin_noise_t *noise, float x, float y) {
-    int xi = (int)floorf(x) & 255;
-    int yi = (int)floorf(y) & 255;
-
-    float xf = x - floorf(x);
-    float yf = y - floorf(y);
-
-    float u = fade(xf);
-    float v = fade(yf);
-
-    int aa = noise->perm[noise->perm[xi] + yi];
-    int ab = noise->perm[noise->perm[xi] + yi + 1];
-    int ba = noise->perm[noise->perm[xi + 1] + yi];
-    int bb = noise->perm[noise->perm[xi + 1] + yi + 1];
-
-    float g_aa = grad_dot(noise->grad[aa], xf, yf);
-    float g_ba = grad_dot(noise->grad[ba], xf - 1.0f, yf);
-    float g_ab = grad_dot(noise->grad[ab], xf, yf - 1.0f);
-    float g_bb = grad_dot(noise->grad[bb], xf - 1.0f, yf - 1.0f);
-
-    float x1 = lerp(g_aa, g_ba, u);
-    float x2 = lerp(g_ab, g_bb, u);
-
-    return lerp(x1, x2, v);
-}
-
-static void hsv_to_rgb(float h, float s, float v, uint8_t *r, uint8_t *g, uint8_t *b) {
-    float c = v * s;
-    float hp = fmodf(h * 6.0f, 6.0f);
-    float x = c * (1.0f - fabsf(fmodf(hp, 2.0f) - 1.0f));
-    float m = v - c;
-
-    float rf, gf, bf;
-    if (hp < 1.0f) { rf = c; gf = x; bf = 0.0f; }
-    else if (hp < 2.0f) { rf = x; gf = c; bf = 0.0f; }
-    else if (hp < 3.0f) { rf = 0.0f; gf = c; bf = x; }
-    else if (hp < 4.0f) { rf = 0.0f; gf = x; bf = c; }
-    else if (hp < 5.0f) { rf = x; gf = 0.0f; bf = c; }
-    else { rf = c; gf = 0.0f; bf = x; }
-
-    *r = (uint8_t)((rf + m) * 255.0f);
-    *g = (uint8_t)((gf + m) * 255.0f);
-    *b = (uint8_t)((bf + m) * 255.0f);
-}
-
-
-typedef struct {
-    float x, y;
-    float radius;
-    float falloff;
-    float hue;
-    float saturation;
-    float brightness;
-} gradient_layer_t;
-
-typedef struct {
-    int width, height;
-    int num_layers;
-    gradient_layer_t *layers;
-    perlin_noise_t noise;
-    xorshift64_t rng;
-} image_generator_t;
-
-
-static void generate_image(image_generator_t *gen, uint8_t *pixels) {
-    for (int py = 0; py < gen->height; py++) {
-        for (int px = 0; px < gen->width; px++) {
-            float r = 0.0f, g = 0.0f, b = 0.0f;
-            float total_weight = 0.0f;
-
-            float noise_val = perlin_2d(&gen->noise,
-                                       px / 100.0f,
-                                       py / 100.0f);
-            noise_val = (noise_val + 1.0f) * 0.5f;
-
-            for (int i = 0; i < gen->num_layers; i++) {
-                gradient_layer_t *layer = &gen->layers[i];
-
-                float dx = px - layer->x;
-                float dy = py - layer->y;
-                float dist = sqrtf(dx * dx + dy * dy);
-
-                float weight = powf(fmaxf(0.0f, 1.0f - dist / layer->radius),
-                                   layer->falloff);
-                weight *= (1.0f + noise_val * 0.3f);
-
-                float h = fmodf(layer->hue + noise_val * 0.1f, 1.0f);
-                float s = fmaxf(0.0f, fminf(1.0f, layer->saturation + (noise_val - 0.5f) * 0.2f));
-                float v = fmaxf(0.0f, fminf(1.0f, layer->brightness + (noise_val - 0.5f) * 0.15f));
-
-                uint8_t tr, tg, tb;
-                hsv_to_rgb(h, s, v, &tr, &tg, &tb);
-
-                r += tr * weight;
-                g += tg * weight;
-                b += tb * weight;
-                total_weight += weight;
-            }
-
-            if (total_weight > 0.001f) {
-                r /= total_weight;
-                g /= total_weight;
-                b /= total_weight;
-            }
-
-            int idx = (py * gen->width + px) * 3;
-            pixels[idx + 0] = (uint8_t)fmaxf(0.0f, fminf(255.0f, r));
-            pixels[idx + 1] = (uint8_t)fmaxf(0.0f, fminf(255.0f, g));
-            pixels[idx + 2] = (uint8_t)fmaxf(0.0f, fminf(255.0f, b));
-        }
-    }
-}
-
-static int write_ppm6(const char *filename, int width, int height, uint8_t *pixels) {
-    FILE *f = fopen(filename, "wb");
-    if (!f) return 0;
-
-    fprintf(f, "P6\n%d %d\n255\n", width, height);
-    fwrite(pixels, 1, width * height * 3, f);
-    fclose(f);
-    return 1;
-}
-
-
-typedef struct {
-    float h, s, v;
-} hsv_color_t;
-
-typedef struct {
-    hsv_color_t colors[8];
-    int count;
-    const char *name;
-} palette_t;
-
-static palette_t palettes[] = {
-    {
-        .name = "Vibrant Neon",
-        .colors = {
-            {0.85f, 1.0f, 1.0f},
-            {0.50f, 1.0f, 1.0f},
-            {0.17f, 1.0f, 1.0f},
-            {0.05f, 1.0f, 0.9f},
-            {0.30f, 1.0f, 1.0f},
-        },
-        .count = 5
-    },
-    {
-        .name = "Deep Moody",
-        .colors = {
-            {0.75f, 0.8f, 0.4f},
-            {0.65f, 0.7f, 0.3f},
-            {0.50f, 0.6f, 0.35f},
-            {0.55f, 0.65f, 0.3f},
-        },
-        .count = 4
-    },
-    {
-        .name = "Smooth Transitions",
-        .colors = {
-            {0.0f, 0.8f, 0.9f},
-            {0.35f, 0.9f, 0.85f},
-            {0.65f, 0.8f, 0.9f},
-            {0.15f, 0.7f, 0.8f},
-        },
-        .count = 4
-    }
-};
-
-#define PALETTE_COUNT 3
-
-static image_generator_t* create_generator(int width, int height, uint64_t seed) {
-    image_generator_t *gen = malloc(sizeof(*gen));
-    gen->width = width;
-    gen->height = height;
-    gen->rng.state = seed;
-
-    int palette_idx = xorshift64_next(&gen->rng) % PALETTE_COUNT;
-    palette_t *palette = &palettes[palette_idx];
-
-    gen->num_layers = 2 + (xorshift64_next(&gen->rng) % 3);
-    gen->layers = malloc(gen->num_layers * sizeof(gradient_layer_t));
-
-    for (int i = 0; i < gen->num_layers; i++) {
-        gradient_layer_t *layer = &gen->layers[i];
-
-        layer->x = xorshift64_float(&gen->rng) * width;
-        layer->y = xorshift64_float(&gen->rng) * height;
-
-        layer->radius = 300.0f + xorshift64_float(&gen->rng) * 1200.0f;
-
-        layer->falloff = 1.0f + xorshift64_float(&gen->rng) * 2.0f;
-
-        hsv_color_t *color = &palette->colors[xorshift64_next(&gen->rng) % palette->count];
-        layer->hue = color->h;
-        layer->saturation = color->s;
-        layer->brightness = color->v;
-    }
-
-    perlin_init(&gen->noise, seed ^ 0xDEADBEEF);
-
-    return gen;
-}
-
-static void destroy_generator(image_generator_t *gen) {
-    free(gen->layers);
-    free(gen);
+    return v;
 }
 
 int main(int argc, char *argv[]) {
-    int width = 1920, height = 1080;
-    uint64_t seed = time(NULL);
+    if (argc < 2) return 1;
 
-    if (argc > 1) seed = strtoull(argv[1], NULL, 10);
-    if (argc > 2) width = atoi(argv[2]);
-    if (argc > 3) height = atoi(argv[3]);
+    unsigned int seed = (unsigned int)time(NULL);
+    srand(seed);
 
-    printf("Generating %dx%d gradient image (seed: %lu)\n", width, height, seed);
+    FILE *fp = fopen(argv[1], "wb");
+    fprintf(fp, "P6\n%d %d\n255\n", WIDTH, HEIGHT);
 
-    image_generator_t *gen = create_generator(width, height, seed);
-    uint8_t *pixels = malloc(width * height * 3);
+    float zoom = rand_f(0.5f, 2.5f);
+    float warp_strength = rand_f(2.0f, 10.0f);
+    float angle = rand_f(0.0f, 6.28f);
+    float cos_a = cosf(angle);
+    float sin_a = sinf(angle);
+    float off_x = rand_f(0, 1000);
+    float off_y = rand_f(0, 1000);
 
-    generate_image(gen, pixels);
-
-    char filename[256];
-    snprintf(filename, sizeof(filename), "gradient_%lu.ppm", seed);
-
-    if (write_ppm6(filename, width, height, pixels)) {
-        printf("Saved to %s\n", filename);
-    } else {
-        printf("Failed to write file\n");
+    float pal[4][3];
+    for(int i=0; i<4; i++) {
+        pal[i][0] = rand_f(0, 255);
+        pal[i][1] = rand_f(0, 255);
+        pal[i][2] = rand_f(0, 255);
     }
 
-    free(pixels);
-    destroy_generator(gen);
+    float aspect = (float)WIDTH / HEIGHT;
+
+    for (int y = 0; y < HEIGHT; y++) {
+        for (int x = 0; x < WIDTH; x++) {
+            float u = (((float)x / WIDTH) * aspect * zoom) + off_x;
+            float v = (((float)y / HEIGHT) * zoom) + off_y;
+
+            float qx = fbm(u, v, cos_a, sin_a);
+            float qy = fbm(u + 1.1f, v + 1.1f, cos_a, sin_a);
+
+            float rx = fbm(u + warp_strength * qx, v + warp_strength * qy, cos_a, sin_a);
+            float ry = fbm(u + warp_strength * qx + 2.0f, v + warp_strength * qy + 3.0f, cos_a, sin_a);
+
+            float val = fbm(u + warp_strength * rx, v + warp_strength * ry, cos_a, sin_a);
+
+            float t = val + length(rx, ry) * 0.2f;
+            float r, g, b;
+
+            if (t < 0.33f) {
+                float f = t / 0.33f;
+                r = mix(pal[0][0], pal[1][0], f);
+                g = mix(pal[0][1], pal[1][1], f);
+                b = mix(pal[0][2], pal[1][2], f);
+            } else if (t < 0.66f) {
+                float f = (t - 0.33f) / 0.33f;
+                r = mix(pal[1][0], pal[2][0], f);
+                g = mix(pal[1][1], pal[2][1], f);
+                b = mix(pal[1][2], pal[2][2], f);
+            } else {
+                float f = fminf(1.0f, (t - 0.66f) / 0.34f);
+                r = mix(pal[2][0], pal[3][0], f);
+                g = mix(pal[2][1], pal[3][1], f);
+                b = mix(pal[2][2], pal[3][2], f);
+            }
+
+            float grain = rand_f(-8.0f, 8.0f);
+
+            fputc((unsigned char)fminf(255, fmaxf(0, r + grain)), fp);
+            fputc((unsigned char)fminf(255, fmaxf(0, g + grain)), fp);
+            fputc((unsigned char)fminf(255, fmaxf(0, b + grain)), fp);
+        }
+    }
+
+    fclose(fp);
+    printf("Variation %u: Scale %.2f, Warp %.2f\n", seed, zoom, warp_strength);
     return 0;
 }
