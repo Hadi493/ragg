@@ -44,12 +44,19 @@ float fbm(float x, float y, float c, float s) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) return 1;
+    if (argc < 2) {
+        printf("Usage: %s <filename>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
 
     unsigned int seed = (unsigned int)time(NULL);
     srand(seed);
 
     FILE *fp = fopen(argv[1], "wb");
+    if (!fp) {
+        fprintf(stderr, "error: failed to open file %s\n", argv[1]);
+        return EXIT_FAILURE;
+    }
     fprintf(fp, "P6\n%d %d\n255\n", WIDTH, HEIGHT);
 
     float zoom = rand_f(0.5f, 2.5f);
@@ -112,5 +119,5 @@ int main(int argc, char *argv[]) {
 
     fclose(fp);
     printf("Variation %u: Scale %.2f, Warp %.2f\n", seed, zoom, warp_strength);
-    return 0;
+    return EXIT_SUCCESS;
 }
